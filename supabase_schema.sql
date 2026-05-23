@@ -149,10 +149,23 @@ insert into settings (key, value) values
         "urgency": 1.0
     }'::jsonb),
     ('research_config', '{
-        "default_industries": ["HVAC", "Plumbing", "Dental", "Roofing", "Veterinary", "Legal", "Medical", "Auto Repair"],
-        "default_cities": ["Phoenix", "Scottsdale", "Tempe", "Mesa", "Chandler", "Gilbert", "Glendale", "Peoria"],
+        "default_industries": [
+            "Insurance Agencies", "Immigration Law", "HVAC", "Plumbing",
+            "Electrical Contractors", "Pest Control", "Pool Service",
+            "Solar Installation", "Roofing", "Locksmith",
+            "Water Damage Restoration", "Bail Bonds", "Dental",
+            "Veterinary", "Property Management", "Auto Repair"
+        ],
+        "default_cities": [
+            "Phoenix", "Scottsdale", "Tempe", "Mesa", "Chandler", "Gilbert",
+            "Glendale", "Peoria", "Surprise", "Avondale", "Goodyear",
+            "Buckeye", "Queen Creek", "Apache Junction", "Maricopa", "Tolleson"
+        ],
         "max_candidates_per_run": 50,
-        "min_google_reviews": 10,
+        "min_reviews": 20,
+        "max_reviews": 5000,
+        "require_website": true,
+        "require_phone": true,
         "research_frequency": "weekly"
     }'::jsonb)
 on conflict (key) do nothing;

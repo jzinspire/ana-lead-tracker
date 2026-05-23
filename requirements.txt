@@ -5,3 +5,5 @@ claude-agent-sdk>=0.0.10
 pandas>=2.0.0
 apify-client>=1.7.0
 python-dotenv>=1.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0

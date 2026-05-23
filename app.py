@@ -422,11 +422,51 @@ def page_lead_detail():
 
     # Score Breakdown
     st.subheader("Score Breakdown")
+
+    # Data-provenance badge: distinguish real research from hardcoded seed data
+    is_enriched = bool(biz.get("enrichment_completed_at"))
+    has_research_run = bool(biz.get("last_research_run_id"))
+    if is_enriched:
+        st.success("✅ **Evidence-backed scores** — each criterion below was scored from real signals (Google reviews, website inspection).")
+    elif has_research_run:
+        st.info("ℹ️ **Researched scores** — scored by Claude from limited data (no per-criterion evidence captured). Re-run research to enrich.")
+    else:
+        st.warning("⚠️ **Seed-data scores (unverified)** — these numbers were hardcoded as starting estimates, not researched. Click **Re-research this business** below to replace with real evidence.")
+
     weights = get_scoring_weights()
     score_cols = st.columns(6)
     for i, (field, label) in enumerate(SCORE_FIELDS):
         val = float(biz.get(field, 0))
         score_cols[i].metric(label, f"{val}/10")
+
+    # Per-criterion evidence (only present on enrichment-driven scores)
+    evidence_fields = [
+        ("evidence_call_volume", "Call Volume"),
+        ("evidence_missed_call_pain", "Missed Call Pain"),
+        ("evidence_bilingual", "Bilingual Opportunity"),
+        ("evidence_tech_readiness", "Tech Readiness"),
+        ("evidence_ease_of_closing", "Ease of Closing"),
+        ("evidence_urgency", "Urgency"),
+    ]
+    has_any_evidence = any(biz.get(f) for f, _ in evidence_fields)
+    if has_any_evidence:
+        with st.expander("📋 Evidence per criterion (real data behind each score)", expanded=True):
+            for field, label in evidence_fields:
+                ev = biz.get(field)
+                if ev:
+                    st.markdown(f"**{label}:** {ev}")
+
+    # Raw signals (for full transparency)
+    if biz.get("website_signals") or biz.get("review_signals"):
+        with st.expander("🔬 Raw signals (scraped data)"):
+            ws = biz.get("website_signals")
+            rs = biz.get("review_signals")
+            if rs:
+                st.markdown("**Review signals**")
+                st.json(rs)
+            if ws:
+                st.markdown("**Website signals**")
+                st.json(ws)
 
     if biz.get("key_evidence"):
         st.markdown(f"**Key Evidence:** {biz['key_evidence']}")
@@ -458,6 +498,17 @@ def page_lead_detail():
             update_business(business_id, updates)
             st.success(f"Status updated to: {new_status}")
             st.rerun()
+
+    # Re-research this business — replaces hardcoded/inferred scores with
+    # evidence-backed ones from the enrichment pipeline.
+    if st.button("🔄 Re-research this business (real-data scoring)"):
+        with st.spinner("Fetching website + reviews + scoring with evidence..."):
+            try:
+                _rescore_single_business(biz)
+                st.success("Re-researched with real evidence. Reloading…")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Re-research failed: {e}")
 
     st.divider()
 
@@ -589,28 +640,52 @@ def page_research():
     research_config = settings.get("research_config", {})
     default_industries = research_config.get(
         "default_industries",
-        ["HVAC", "Plumbing", "Dental", "Roofing", "Veterinary", "Legal", "Medical", "Auto Repair"],
+        [
+            "Insurance Agencies", "Immigration Law", "HVAC", "Plumbing",
+            "Electrical Contractors", "Pest Control", "Pool Service",
+            "Solar Installation", "Roofing", "Locksmith",
+            "Water Damage Restoration", "Bail Bonds", "Dental",
+            "Veterinary", "Property Management", "Auto Repair",
+        ],
     )
     default_cities = research_config.get(
         "default_cities",
-        ["Phoenix", "Scottsdale", "Tempe", "Mesa", "Chandler", "Gilbert", "Glendale", "Peoria"],
+        [
+            "Phoenix", "Scottsdale", "Tempe", "Mesa", "Chandler", "Gilbert",
+            "Glendale", "Peoria", "Surprise", "Avondale", "Goodyear",
+            "Buckeye", "Queen Creek", "Apache Junction", "Maricopa", "Tolleson",
+        ],
     )
 
     st.subheader("Configure Research Run")
+    st.caption(
+        "Industries and cities below come from your Settings page. "
+        "All are pre-selected — uncheck any you want to skip for this run."
+    )
     col1, col2 = st.columns(2)
     with col1:
         industries = st.multiselect(
             "Industries to search",
-            default_industries + ["Other"],
-            default=default_industries[:4],
+            default_industries,
+            default=default_industries,
         )
     with col2:
         cities = st.multiselect(
-            "Cities to search", default_cities, default=default_cities[:4]
+            "Cities to search",
+            default_cities,
+            default=default_cities,
         )
 
-    max_candidates = st.slider("Max candidates to score", 10, 100, 50, 10)
+    max_candidates = st.slider("Max candidates to score", 10, 200, 50, 10)
     run_type = st.radio("Run type", ["manual", "weekly", "daily"], horizontal=True)
+
+    # Show the candidate budget estimate so user understands cost
+    combos = len(industries) * len(cities)
+    if combos > 0:
+        st.caption(
+            f"📊 {len(industries)} industries × {len(cities)} cities = {combos} search combinations. "
+            f"Each combo pulls up to 10 places (capped at {max_candidates} total) and uses ~1 Apify credit."
+        )
 
     st.divider()
 
@@ -720,13 +795,32 @@ def _execute_research(
         if existing_resp.data:
             existing_names = {r["name"].lower() for r in existing_resp.data}
 
+        # Whitelist of columns that exist on the businesses table. Anything
+        # else on the scored dict (e.g., enrichment artifacts) gets dropped
+        # to avoid Supabase "column does not exist" errors.
+        allowed_cols = {
+            "name", "industry", "city", "state", "website", "phone", "email",
+            "google_reviews", "yelp_url", "google_maps_url",
+            "score_call_volume", "score_missed_call_pain", "score_bilingual",
+            "score_tech_readiness", "score_ease_of_closing", "score_urgency",
+            "overall_score", "score_explanation", "key_evidence",
+            "suggested_call_script", "status", "not_interested_reason",
+            "last_research_run_id", "research_data", "data_source", "archived",
+            "evidence_call_volume", "evidence_missed_call_pain",
+            "evidence_bilingual", "evidence_tech_readiness",
+            "evidence_ease_of_closing", "evidence_urgency",
+            "website_signals", "review_signals", "review_count",
+            "enrichment_completed_at",
+        }
+
         new_count = 0
         for biz in scored:
             if biz["name"].lower() in existing_names:
                 continue
             biz["last_research_run_id"] = run_id
             biz["status"] = "Research Done"
-            sb().table("businesses").insert(biz).execute()
+            row = {k: v for k, v in biz.items() if k in allowed_cols}
+            sb().table("businesses").insert(row).execute()
             new_count += 1
 
         # Step 4: Update run record
@@ -761,6 +855,66 @@ def _execute_research(
         raise
 
 
+# Maps each industry name from research_config to the Google Maps search
+# keyword that actually returns the right businesses. Without this, generic
+# names like "Medical" or "Legal" pull in random clinics and large law firms
+# that aren't a fit for Ana ($20K–$50K SMB consultative sale).
+INDUSTRY_QUERY_MAP = {
+    "Insurance Agencies": "insurance agency",
+    "Immigration Law": "immigration lawyer",
+    "HVAC": "HVAC contractor",
+    "Plumbing": "plumbing contractor",
+    "Electrical Contractors": "electrical contractor",
+    "Pest Control": "pest control service",
+    "Pool Service": "pool cleaning service",
+    "Solar Installation": "solar installation company",
+    "Roofing": "roofing contractor",
+    "Locksmith": "locksmith",
+    "Water Damage Restoration": "water damage restoration",
+    "Bail Bonds": "bail bonds agent",
+    "Dental": "dentist",
+    "Veterinary": "veterinarian",
+    "Property Management": "property management company",
+    "Auto Repair": "auto repair shop",
+    # Legacy fallbacks (kept so old data still resolves)
+    "Medical": "medical clinic",
+    "Legal": "law firm",
+}
+
+
+def _search_query_for(industry: str, city: str) -> str:
+    """Build a Google Maps search query optimized for the target industry."""
+    keyword = INDUSTRY_QUERY_MAP.get(industry, industry.lower())
+    return f"{keyword} in {city}, AZ"
+
+
+def _passes_prefilter(item: dict, config: dict) -> tuple[bool, str]:
+    """Apply pre-Claude filters to drop obvious bad-fit candidates.
+
+    Returns (passed, rejection_reason). Saves Apify+Claude credits on
+    candidates that have no chance of being a fit.
+    """
+    review_count = item.get("reviewsCount") or item.get("reviewsTotalCount") or 0
+    website = (item.get("website") or "").strip()
+    phone = (item.get("phone") or "").strip()
+
+    min_reviews = int(config.get("min_reviews", 20))
+    max_reviews = int(config.get("max_reviews", 5000))
+    require_website = config.get("require_website", True)
+    require_phone = config.get("require_phone", True)
+
+    if review_count < min_reviews:
+        return False, f"too few reviews ({review_count} < {min_reviews})"
+    if review_count > max_reviews:
+        return False, f"too big ({review_count} > {max_reviews} reviews — likely enterprise)"
+    if require_website and not website:
+        return False, "no website (can't enrich or build credibility)"
+    if require_phone and not phone:
+        return False, "no phone number (defeats the purpose of Ana)"
+
+    return True, ""
+
+
 def _collect_candidates(
     industries: list[str], cities: list[str], max_candidates: int, apify_token: str
 ) -> list[dict]:
@@ -769,7 +923,11 @@ def _collect_candidates(
     Uses Apify Google Maps Scraper if token is available, otherwise generates
     search-ready candidate stubs for manual enrichment or Claude web search.
     """
-    candidates = []
+    candidates: list[dict] = []
+    rejected: list[str] = []  # reasons, for transparency on the UI
+
+    # Load filter knobs from research_config
+    config = load_settings().get("research_config", {}) or {}
 
     if apify_token:
         try:
@@ -781,27 +939,49 @@ def _collect_candidates(
                 for city in cities:
                     if len(candidates) >= max_candidates:
                         break
-                    query = f"{industry} near {city}, AZ"
+                    query = _search_query_for(industry, city)
                     run_input = {
                         "searchStringsArray": [query],
                         "maxCrawledPlacesPerSearch": min(
                             10, max_candidates - len(candidates)
                         ),
                         "language": "en",
-                        "maxReviews": 0,
+                        # Pull the latest 30 reviews per business so we can
+                        # mine them for missed-call complaints, Spanish
+                        # usage, and review velocity. This is what gives
+                        # the scoring real evidence instead of inference.
+                        "maxReviews": 30,
                     }
                     run = client.actor("drobnikj/crawler-google-places").call(
                         run_input=run_input
                     )
                     dataset = client.dataset(run["defaultDatasetId"])
                     for item in dataset.iterate_items():
+                        # Pre-filter to drop obvious bad-fit candidates BEFORE
+                        # we spend website-fetch + Claude tokens on them.
+                        passed, reason = _passes_prefilter(item, config)
+                        if not passed:
+                            rejected.append(
+                                f"{item.get('title', '(unnamed)')}: {reason}"
+                            )
+                            continue
+
+                        # Capture real review count + rating separately
+                        review_count = (
+                            item.get("reviewsCount")
+                            or item.get("reviewsTotalCount")
+                            or 0
+                        )
                         candidates.append({
                             "name": item.get("title", ""),
                             "industry": industry,
                             "city": item.get("city", city),
                             "website": item.get("website", ""),
                             "phone": item.get("phone", ""),
-                            "google_reviews": str(item.get("totalScore", "")),
+                            "google_reviews": (
+                                f"{review_count} reviews"
+                                f" · {item.get('totalScore', '?')}★"
+                            ),
                             "google_maps_url": item.get("url", ""),
                             "research_data": json.dumps(item),
                             "data_source": "apify_google_maps",
@@ -823,6 +1003,27 @@ def _collect_candidates(
             "For better results, add an Apify token in Settings."
         )
         candidates = _generate_search_stubs(industries, cities, max_candidates)
+
+    # Show pre-filter rejections so the user understands why a search returned
+    # fewer candidates than expected (e.g., too few reviews, no website).
+    if rejected:
+        with st.expander(f"ℹ️ {len(rejected)} candidates filtered out before scoring"):
+            for r in rejected[:50]:
+                st.markdown(f"- {r}")
+
+    # Enrichment pass: fetch each candidate's website + parse review patterns.
+    # This is what makes the scoring evidence-based instead of inferred.
+    try:
+        from enrichment import enrich_candidate
+        for i, c in enumerate(candidates):
+            enrich_candidate(c)
+    except ImportError:
+        st.warning(
+            "Enrichment module not available. Scores will be less precise. "
+            "Run: pip install beautifulsoup4 requests"
+        )
+    except Exception as e:
+        st.warning(f"Enrichment partial failure (continuing): {e}")
 
     return candidates
 
@@ -846,39 +1047,104 @@ def _generate_search_stubs(
     return stubs
 
 
-SCORING_SYSTEM_PROMPT = """You are an expert business analyst for Itxaz, a company that sells Ana Receptionist — an AI-powered voice receptionist for SMBs. Your job is to evaluate businesses and score them on how likely they are to be a good fit for Ana Receptionist.
+SCORING_SYSTEM_PROMPT = """You are an expert business analyst for Itxaz, a company that sells Ana Receptionist — an AI-powered voice receptionist for SMBs. Your job is to score prospect businesses for Ana Receptionist fit using REAL observable data, not inference.
 
-Ana Receptionist answers phone calls 24/7, books appointments, speaks English and Spanish, and ensures businesses never miss a customer call. The ideal customer:
-- Has high inbound call volume (especially after hours or during peak times)
-- Loses revenue from missed/abandoned calls
-- Serves bilingual (English/Spanish) communities
-- Is technologically ready to adopt AI tools
-- Has accessible decision-makers and budget
-- Has urgent pain (seasonal demand, growth, staffing issues)
+Ana Receptionist answers phone calls 24/7, books appointments, speaks English and Spanish, and ensures businesses never miss a customer call. The ideal customer has high inbound call volume, loses revenue from missed calls, serves bilingual communities, is tech-ready, has accessible decision-makers, and faces urgent pain.
 
-Score each business on these six criteria (1-10 scale):
-1. Call Volume — estimated daily inbound calls
-2. Missed Call Pain — how much they lose from missed calls
-3. Bilingual Opportunity — Spanish-speaking customer base
-4. Tech Readiness — existing tech sophistication + AI willingness
-5. Ease of Closing — decision-maker access, budget signals
-6. Urgency — time-sensitive pain driving immediate need
+## CRITICAL RULE: EVIDENCE-BASED SCORING
 
-For each business, provide:
-- Individual scores (1-10) for each criterion
-- An overall weighted score
-- Key evidence supporting the scores (2-3 sentences)
-- A brief suggested call script opening tailored to this specific business
+For each business you will receive a fact sheet of observable signals scraped from Google Maps reviews and the business's website. You MUST ground each score in those signals. If a signal is missing or the website couldn't be fetched, lower the score AND explicitly say "data unavailable" in the evidence field — do NOT invent.
 
-Respond in valid JSON format as an array of objects with these fields:
-name, industry, city, website, phone, google_reviews,
-score_call_volume, score_missed_call_pain, score_bilingual,
-score_tech_readiness, score_ease_of_closing, score_urgency,
-overall_score, key_evidence, score_explanation, suggested_call_script
+## SCORING RUBRIC (1-10 scale)
 
-IMPORTANT: Be realistic. Don't inflate scores. A score of 7+ should mean genuine strong fit.
-Phoenix metro area is heavily Hispanic — most service businesses here have bilingual opportunity of at least 6-7.
-HVAC/Plumbing in Phoenix has extreme seasonal urgency (summer = 110°F+ = AC emergencies).
+**1. Call Volume** — proxy via the data we have
+  - Score from: Google review count (heavy proxy for customer volume), industry baseline (HVAC/plumbing/dental/law = high; retail = low), multiple locations indicator
+  - 9-10: 500+ Google reviews AND high-call industry
+  - 7-8: 200-500 reviews in a high-call industry, OR 500+ in moderate-call industry
+  - 5-6: 50-200 reviews
+  - 1-4: <50 reviews or low-call industry
+  - Evidence MUST cite the actual review count provided
+
+**2. Missed Call Pain** — direct evidence from review mining
+  - Score primarily from `missed_call_complaint_count` in the fact sheet (reviews mentioning "couldn't reach", "no answer", "voicemail", etc.)
+  - 9-10: 3+ documented missed-call complaints in reviews
+  - 7-8: 1-2 missed-call complaints OR very high-volume + after-hours industry
+  - 5-6: No complaints found but high-pain industry (HVAC summer, plumbing emergencies)
+  - 1-4: No complaints + low-urgency industry
+  - Evidence MUST quote actual complaints when present, or say "no missed-call complaints found in {N} reviews sampled"
+
+**3. Bilingual Opportunity** — direct evidence from website + reviews
+  - Score from: `has_spanish_version` (website has Spanish toggle/page), `spanish_review_count` (reviews in Spanish), Phoenix demographics (~43% Hispanic) as baseline
+  - 9-10: Website has Spanish version AND multiple Spanish reviews
+  - 7-8: One of those signals present (Spanish reviews OR Spanish site)
+  - 5-6: No direct Spanish signals but Phoenix industry baseline
+  - 1-4: Low-demand industry for Spanish AND no signals
+  - Evidence MUST cite the specific signals (e.g., "5 Spanish reviews in sample of 30, website has /es/ page")
+
+**4. Tech Readiness** — direct evidence from website scraping
+  - Score from: `has_https`, `has_mobile_viewport`, `has_online_booking`, `has_chat_widget`, `has_modern_framework`, `copyright_year`
+  - 9-10: 4+ of those signals present
+  - 7-8: 3 signals present
+  - 5-6: 1-2 signals present
+  - 1-4: Site couldn't be fetched OR only HTTPS (bare minimum)
+  - Evidence MUST list which signals were present
+
+**5. Ease of Closing** — proxy via observable business-structure signals
+  - Score from: `family_business_signal` on website, business size (large enterprise = harder), industry (owner-operated SMBs = easier)
+  - 9-10: Strong family/owner-operated signal AND moderate size (50-500 reviews)
+  - 7-8: Family signal present OR clearly SMB
+  - 5-6: Mid-size, no ownership clarity
+  - 1-4: Large multi-location operation OR no website to read
+  - Evidence MUST cite the actual signal (e.g., "homepage says 'Family-owned since 1985'")
+
+**6. Urgency** — proxy via observable signals
+  - Score from: industry seasonality (HVAC + Phoenix = extreme summer urgency), `has_careers_page` (hiring = growth pain), `review_velocity_signal` (accelerating = growing), `recent_review_count_90d`
+  - 9-10: Industry in peak season AND visible growth signals (hiring, accelerating reviews)
+  - 7-8: One strong signal (seasonal peak OR clear growth)
+  - 5-6: Industry baseline, no specific signals
+  - 1-4: No urgency signals at all
+  - Evidence MUST cite specific signals
+
+## OUTPUT FORMAT
+
+Respond with a JSON array, one object per business. Required fields:
+
+```
+{
+  "name": "...",
+  "industry": "...",
+  "city": "...",
+  "website": "...",
+  "phone": "...",
+  "google_reviews": "...",  // copy the input value as-is
+  "score_call_volume": 8,
+  "evidence_call_volume": "342 Google reviews, HVAC industry in Phoenix.",
+  "score_missed_call_pain": 9,
+  "evidence_missed_call_pain": "3 reviews quote missed-call complaints: 'never returned my call', 'phone goes straight to voicemail'.",
+  "score_bilingual": 7,
+  "evidence_bilingual": "5 Spanish reviews out of 30 sampled. Website has no Spanish version. Phoenix HVAC industry baseline.",
+  "score_tech_readiness": 6,
+  "evidence_tech_readiness": "HTTPS yes, mobile viewport yes, online booking no, chat widget no, modern framework no.",
+  "score_ease_of_closing": 8,
+  "evidence_ease_of_closing": "Homepage states 'Family-owned and operated since 1985'. Single-location business.",
+  "score_urgency": 9,
+  "evidence_urgency": "HVAC in Phoenix during summer = peak urgency. Careers page present (hiring signal). Review velocity: accelerating (8 reviews in last 90 days).",
+  "overall_score": 7.8,  // will be recomputed by the system, just give your best estimate
+  "key_evidence": "2-3 sentence summary of why this is a fit",
+  "score_explanation": "Brief overall reasoning",
+  "suggested_call_script": "Personalized 2-3 sentence opener tailored to specific evidence above"
+}
+```
+
+## ANTI-INFLATION RULES
+
+- A score of 9-10 requires MULTIPLE concrete signals. Never give 9+ from inference alone.
+- If `website_signals.fetched = false`, cap Tech Readiness and Ease of Closing at 5.
+- If `total_review_count < 20`, cap Call Volume at 5.
+- If `missed_call_complaint_count = 0` AND industry isn't HVAC/plumbing/legal, cap Missed Call Pain at 6.
+- Be brutally honest. A 6 with real evidence is better than a 9 from imagination.
+
+Return ONLY the JSON array. No preamble. Begin with `[` end with `]`.
 """
 
 
@@ -932,13 +1198,26 @@ def _score_candidates_with_claude(
             + "\n\nAdjust your scoring based on this feedback where applicable."
         )
 
-    candidates_text = json.dumps(candidates, indent=2, default=str)
+    # Build human-readable evidence briefs for each candidate.
+    # Falls back to raw JSON if the enrichment module isn't available
+    # (e.g., legacy code path).
+    try:
+        from enrichment import signals_to_evidence_brief
+        briefs = []
+        for c in candidates:
+            briefs.append(signals_to_evidence_brief(c))
+        candidates_text = "\n\n---\n\n".join(briefs)
+    except ImportError:
+        candidates_text = json.dumps(candidates, indent=2, default=str)
 
     user_msg = (
         f"Score these candidate businesses for Ana Receptionist fit. "
         f"Apply these scoring weights: {json.dumps(weights)}\n\n"
-        f"Candidates:\n{candidates_text}"
+        f"## CANDIDATES (real data — score from these signals only):\n\n"
+        f"{candidates_text}"
         f"{feedback_context}\n\n"
+        f"Return ONE JSON object per candidate above, in the same order. "
+        f"Every score MUST cite the evidence field from the fact sheet. "
         f"Respond with ONLY a JSON array — no preamble, no markdown fences, no commentary. "
         f"Begin your response with `[` and end with `]`."
     )
@@ -976,6 +1255,10 @@ def _score_candidates_with_claude(
         st.code(response_text[json_start:json_end])
         return []
 
+    # Merge Claude's scores + per-criterion evidence back onto the original
+    # candidate records (so we keep enrichment signals + Apify URLs intact).
+    by_name = {(c.get("name") or "").lower().strip(): c for c in candidates}
+    merged: list[dict] = []
     for biz in scored:
         scores = {
             "score_call_volume": biz.get("score_call_volume", 5),
@@ -988,7 +1271,147 @@ def _score_candidates_with_claude(
         biz["overall_score"] = compute_overall_score(scores, weights)
         biz.update(scores)
 
-    return scored
+        # Pull enrichment signals back from the original candidate
+        original = by_name.get((biz.get("name") or "").lower().strip())
+        if original:
+            biz["website_signals"] = original.get("website_signals")
+            biz["review_signals"] = original.get("review_signals")
+            biz["review_count"] = original.get("review_count")
+            biz["research_data"] = original.get("research_data")
+            biz["data_source"] = original.get("data_source")
+            biz["google_maps_url"] = original.get("google_maps_url")
+        biz["enrichment_completed_at"] = datetime.utcnow().isoformat()
+        merged.append(biz)
+
+    return merged
+
+
+def _rescore_single_business(biz: dict) -> None:
+    """Re-research one existing business with the enrichment pipeline.
+
+    Used by the "Re-research this business" button on Lead Detail to
+    upgrade hardcoded seed-data scores to evidence-backed ones.
+    """
+    import asyncio
+    from enrichment import enrich_candidate, signals_to_evidence_brief
+
+    # Build a candidate dict from the existing business record
+    candidate = {
+        "name": biz.get("name", ""),
+        "industry": biz.get("industry", ""),
+        "city": biz.get("city", ""),
+        "website": biz.get("website", ""),
+        "phone": biz.get("phone", ""),
+        "google_maps_url": biz.get("google_maps_url", ""),
+        "research_data": biz.get("research_data"),
+        "data_source": biz.get("data_source") or "manual_rescore",
+    }
+
+    # If we have an Apify token AND no existing research_data, try to fetch
+    # fresh Google Maps data first so review mining has something to work with.
+    apify_token = _get_secret("APIFY_API_TOKEN")
+    if apify_token and not candidate.get("research_data"):
+        try:
+            from apify_client import ApifyClient
+            client = ApifyClient(apify_token)
+            query = f"{candidate['name']} {candidate['city']} AZ"
+            run = client.actor("drobnikj/crawler-google-places").call(
+                run_input={
+                    "searchStringsArray": [query],
+                    "maxCrawledPlacesPerSearch": 1,
+                    "language": "en",
+                    "maxReviews": 30,
+                }
+            )
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                candidate["research_data"] = json.dumps(item)
+                candidate["website"] = candidate["website"] or item.get("website", "")
+                candidate["phone"] = candidate["phone"] or item.get("phone", "")
+                candidate["google_maps_url"] = item.get("url", "")
+                review_count = item.get("reviewsCount") or 0
+                candidate["google_reviews"] = (
+                    f"{review_count} reviews · {item.get('totalScore', '?')}★"
+                )
+                break
+        except Exception as e:
+            st.warning(f"Apify fetch skipped: {e}. Will score from website only.")
+
+    # Enrich + score
+    enrich_candidate(candidate)
+    weights = get_scoring_weights()
+    feedback = get_feedback_history()
+
+    class _NoOpProgress:
+        def progress(self, *a, **kw): pass
+
+    scored = _score_candidates_with_claude([candidate], weights, feedback, _NoOpProgress())
+    if not scored:
+        raise RuntimeError("Claude returned no scores")
+
+    s = scored[0]
+    updates = {
+        "score_call_volume": s.get("score_call_volume"),
+        "score_missed_call_pain": s.get("score_missed_call_pain"),
+        "score_bilingual": s.get("score_bilingual"),
+        "score_tech_readiness": s.get("score_tech_readiness"),
+        "score_ease_of_closing": s.get("score_ease_of_closing"),
+        "score_urgency": s.get("score_urgency"),
+        "overall_score": s.get("overall_score"),
+        "key_evidence": s.get("key_evidence"),
+        "score_explanation": s.get("score_explanation"),
+        "suggested_call_script": s.get("suggested_call_script"),
+        "evidence_call_volume": s.get("evidence_call_volume"),
+        "evidence_missed_call_pain": s.get("evidence_missed_call_pain"),
+        "evidence_bilingual": s.get("evidence_bilingual"),
+        "evidence_tech_readiness": s.get("evidence_tech_readiness"),
+        "evidence_ease_of_closing": s.get("evidence_ease_of_closing"),
+        "evidence_urgency": s.get("evidence_urgency"),
+        "website_signals": candidate.get("website_signals"),
+        "review_signals": candidate.get("review_signals"),
+        "review_count": candidate.get("review_count"),
+        "research_data": candidate.get("research_data"),
+        "data_source": candidate.get("data_source"),
+        "google_maps_url": candidate.get("google_maps_url") or biz.get("google_maps_url"),
+        "website": candidate.get("website") or biz.get("website"),
+        "phone": candidate.get("phone") or biz.get("phone"),
+        "enrichment_completed_at": datetime.utcnow().isoformat(),
+    }
+    # Drop None values so we don't overwrite existing data with NULL
+    updates = {k: v for k, v in updates.items() if v is not None}
+    sb().table("businesses").update(updates).eq("id", biz["id"]).execute()
+
+
+def _bulk_rescore_seed_data() -> None:
+    """Loop through every unverified business and re-research it with the
+    enrichment pipeline. Used from the Settings page."""
+    rows = sb().table("businesses").select("*").is_("enrichment_completed_at", "null").eq("archived", False).execute()
+    targets = rows.data or []
+    if not targets:
+        st.info("No unverified businesses to re-research.")
+        return
+
+    progress = st.progress(0, text=f"Starting bulk re-research of {len(targets)} businesses...")
+    succeeded = 0
+    failed: list[str] = []
+
+    for i, biz in enumerate(targets):
+        progress.progress(
+            int((i / len(targets)) * 100),
+            text=f"[{i + 1}/{len(targets)}] {biz.get('name', '(unnamed)')}",
+        )
+        try:
+            _rescore_single_business(biz)
+            succeeded += 1
+        except Exception as e:
+            failed.append(f"{biz.get('name')}: {e}")
+
+    progress.progress(100, text=f"Done. {succeeded}/{len(targets)} re-researched.")
+    if succeeded:
+        st.success(f"✅ Upgraded {succeeded} businesses to real-evidence scoring.")
+    if failed:
+        with st.expander(f"⚠️ {len(failed)} failures"):
+            for f in failed:
+                st.markdown(f"- {f}")
 
 
 # ---------------------------------------------------------------------------
@@ -1030,6 +1453,28 @@ def page_settings():
 
     st.divider()
 
+    # Bulk re-research of seed-data businesses
+    st.subheader("Upgrade Seed Data to Real Evidence")
+    st.caption(
+        "Businesses that were loaded from seed data (hardcoded estimates) need to be "
+        "re-researched with real signals from their website + Google reviews. "
+        "Click below to upgrade them all in one batch."
+    )
+
+    # Count how many are unverified (no enrichment yet)
+    try:
+        unverified = sb().table("businesses").select("id", count="exact").is_("enrichment_completed_at", "null").eq("archived", False).execute()
+        seed_count = unverified.count
+    except Exception:
+        seed_count = "unknown"
+
+    st.markdown(f"**Businesses needing real-data scoring:** {seed_count}")
+
+    if st.button(f"🔄 Re-research all unverified businesses ({seed_count})"):
+        _bulk_rescore_seed_data()
+
+    st.divider()
+
     # Research config
     st.subheader("Research Configuration")
     research_config = settings.get("research_config", {})
@@ -1037,18 +1482,18 @@ def page_settings():
     industries_str = st.text_area(
         "Default industries (one per line)",
         value="\n".join(research_config.get("default_industries", [])),
-        height=120,
+        height=240,
     )
     cities_str = st.text_area(
         "Default cities (one per line)",
         value="\n".join(research_config.get("default_cities", [])),
-        height=100,
+        height=240,
     )
     max_per_run = st.number_input(
         "Max candidates per research run",
         value=research_config.get("max_candidates_per_run", 50),
         min_value=10,
-        max_value=200,
+        max_value=500,
     )
     frequency = st.selectbox(
         "Research frequency",
@@ -1056,12 +1501,47 @@ def page_settings():
         index=0 if research_config.get("research_frequency") == "weekly" else 1,
     )
 
+    # Pre-filter knobs — drop obvious bad-fit candidates BEFORE we spend
+    # Claude tokens scoring them. Saves Apify credits + improves list quality.
+    st.markdown("**Pre-filter rules (drop bad candidates before scoring)**")
+    filter_cols = st.columns(2)
+    with filter_cols[0]:
+        min_reviews = st.number_input(
+            "Minimum Google reviews",
+            value=int(research_config.get("min_reviews", 20)),
+            min_value=0,
+            max_value=10000,
+            help="Drops brand-new businesses too small to be a fit.",
+        )
+        require_website = st.checkbox(
+            "Require website",
+            value=research_config.get("require_website", True),
+            help="Without a website we can't enrich or check tech readiness.",
+        )
+    with filter_cols[1]:
+        max_reviews = st.number_input(
+            "Maximum Google reviews",
+            value=int(research_config.get("max_reviews", 5000)),
+            min_value=100,
+            max_value=100000,
+            help="Drops enterprise-sized businesses outside Ana's $20K-$50K sweet spot.",
+        )
+        require_phone = st.checkbox(
+            "Require phone number",
+            value=research_config.get("require_phone", True),
+            help="No phone = Ana has nothing to answer.",
+        )
+
     if st.button("Save Research Config"):
         new_config = {
             "default_industries": [i.strip() for i in industries_str.split("\n") if i.strip()],
             "default_cities": [c.strip() for c in cities_str.split("\n") if c.strip()],
             "max_candidates_per_run": max_per_run,
             "research_frequency": frequency,
+            "min_reviews": int(min_reviews),
+            "max_reviews": int(max_reviews),
+            "require_website": bool(require_website),
+            "require_phone": bool(require_phone),
         }
         save_setting("research_config", new_config)
         st.success("Research configuration saved!")

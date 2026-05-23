@@ -1,37 +1,6 @@
-# Python
+.env
+.streamlit/secrets.toml
 __pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Virtual environments
+*.pyc
 .venv/
 venv/
-env/
-
-# Environment variables
-.env
-.env.*
-!.env.example
-
-# Streamlit
-.streamlit/secrets.toml
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Supabase local
-supabase/.temp/
-
-# Vercel (if ever added)
-.vercel/

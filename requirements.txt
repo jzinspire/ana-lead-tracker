@@ -1,0 +1,6 @@
+streamlit>=1.35.0
+supabase>=2.5.0
+claude-agent-sdk>=0.0.10
+pandas>=2.0.0
+apify-client>=1.7.0
+python-dotenv>=1.0.0

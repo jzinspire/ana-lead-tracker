@@ -120,5 +120,25 @@ That's it — 3 commands.
 |------|-----|
 | Start the app | `cd ~/Desktop/ana-lead-tracker && source venv/bin/activate && streamlit run app.py` |
 | Stop the app | Press Ctrl + C in Terminal |
-| Update to latest version | `cd ~/Desktop/ana-lead-tracker && git pull` |
+| Update to latest version | `cd ~/Desktop/ana-lead-tracker && git pull && source venv/bin/activate && pip install -r requirements.txt` |
 | Problems? | Ask Josue or check the error message in Terminal |
+
+---
+
+## If something doesn't work
+
+**"ModuleNotFoundError: No module named 'beautifulsoup4'" (or similar)**
+You forgot to install dependencies after a `git pull`. Run:
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**"Missing SUPABASE_URL or SUPABASE_KEY"**
+Your `.env` file is missing or empty. Ask Josue for the values.
+
+**"Claude CLI not on PATH"**
+You need to install Claude Code (Step 1) and log in with `claude login`.
+
+**App opens but pages are blank**
+The Supabase database might be paused (free tier sleeps after inactivity). Ask Josue to check the Supabase dashboard.

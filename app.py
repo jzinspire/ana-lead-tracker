@@ -5,6 +5,7 @@ import time
 import os
 from datetime import datetime, date
 from supabase import create_client, Client
+import anthropic
 
 # Load .env so SUPABASE_URL / SUPABASE_KEY / APIFY_API_TOKEN are available via
 # os.getenv() when running locally. On Streamlit Cloud, the secrets.toml managed
@@ -28,6 +29,22 @@ def _get_secret(key: str, default: str = "") -> str:
         return st.secrets.get(key, os.getenv(key, default))
     except Exception:
         return os.getenv(key, default)
+
+
+def _call_anthropic_api(user_prompt: str, system_prompt: str = "", max_tokens: int = 2048) -> str:
+    """Call the Anthropic API directly. Used as fallback when Claude CLI/SDK unavailable."""
+    api_key = _get_secret("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "[No ANTHROPIC_API_KEY configured. Add it to Streamlit secrets or .env]"
+    client = anthropic.Anthropic(api_key=api_key)
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=max_tokens,
+        system=system_prompt if system_prompt else anthropic.NOT_GIVEN,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    return msg.content[0].text
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -932,15 +949,16 @@ def _score_candidates_with_claude(
         response_text = asyncio.run(
             _query_claude_via_sdk(prompt=user_msg, system_prompt=SCORING_SYSTEM_PROMPT)
         )
-    except FileNotFoundError:
-        st.error(
-            "Claude Code CLI not found. Install it from https://docs.claude.com/claude-code "
-            "and run `claude login` before using the research feature."
-        )
-        return []
-    except Exception as e:
-        st.error(f"Claude Agent SDK error: {e}")
-        return []
+    except Exception:
+        try:
+            response_text = _call_anthropic_api(
+                user_prompt=user_msg,
+                system_prompt=SCORING_SYSTEM_PROMPT,
+                max_tokens=4096,
+            )
+        except Exception as e:
+            st.error(f"Claude scoring error: {e}")
+            return []
 
     progress.progress(70, text="Parsing results...")
 
@@ -1272,10 +1290,7 @@ def generate_personalized_script(business: dict, language: str = "en", caller_na
     # Resolve the full path to claude so subprocess doesn't depend on PATH
     claude_path = shutil.which("claude")
     if not claude_path:
-        return (
-            "[Claude CLI not on PATH. Install from https://docs.claude.com/claude-code "
-            "and run `claude login`. PATH=" + os.environ.get("PATH", "")[:300] + "]"
-        )
+        return _call_anthropic_api(user_prompt=prompt)
 
     # Build an explicit environment to ensure HOME and shell env are inherited correctly
     env = os.environ.copy()

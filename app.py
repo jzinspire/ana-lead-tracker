@@ -955,7 +955,7 @@ def _collect_candidates(
                     run = client.actor("drobnikj/crawler-google-places").call(
                         run_input=run_input
                     )
-                    dataset = client.dataset(run["defaultDatasetId"])
+                    dataset = client.dataset(run.default_dataset_id)
                     for item in dataset.iterate_items():
                         # Pre-filter to drop obvious bad-fit candidates BEFORE
                         # we spend website-fetch + Claude tokens on them.
@@ -1323,7 +1323,7 @@ def _rescore_single_business(biz: dict) -> None:
                     "maxReviews": 30,
                 }
             )
-            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+            for item in client.dataset(run.default_dataset_id).iterate_items():
                 candidate["research_data"] = json.dumps(item)
                 candidate["website"] = candidate["website"] or item.get("website", "")
                 candidate["phone"] = candidate["phone"] or item.get("phone", "")

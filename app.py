@@ -1065,13 +1065,14 @@ For each business you will receive a fact sheet of observable signals scraped fr
   - 1-4: <50 reviews or low-call industry
   - Evidence MUST cite the actual review count provided
 
-**2. Missed Call Pain** — direct evidence from review mining
+**2. Missed Call Pain** — direct evidence from review mining + industry economics
   - Score primarily from `missed_call_complaint_count` in the fact sheet (reviews mentioning "couldn't reach", "no answer", "voicemail", etc.)
-  - 9-10: 3+ documented missed-call complaints in reviews
-  - 7-8: 1-2 missed-call complaints OR very high-volume + after-hours industry
-  - 5-6: No complaints found but high-pain industry (HVAC summer, plumbing emergencies)
-  - 1-4: No complaints + low-urgency industry
-  - Evidence MUST quote actual complaints when present, or say "no missed-call complaints found in {N} reviews sampled"
+  - "High-pain industries" (each missed call = significant lost revenue): HVAC, Plumbing, Electrical, Roofing, Restoration, Water Damage, Insurance, Solar, Legal/Law, Bail Bonds, Locksmith, Towing, Funeral Homes
+  - 9-10: 3+ documented missed-call complaints in reviews, OR (500+ reviews AND high-pain industry — the volume × industry pattern makes missed calls a near certainty)
+  - 7-8: 1-2 missed-call complaints, OR (200+ reviews AND high-pain industry), OR very high-volume after-hours business
+  - 5-6: No complaints found but high-pain industry, OR moderate volume (50-200 reviews) in any service industry
+  - 1-4: No complaints AND low-stakes industry (per-call value is small)
+  - Evidence MUST quote actual complaints when present, or say "no complaints found in {N} reviews sampled; scoring from {volume} + {industry} pattern"
 
 **3. Bilingual Opportunity** — direct evidence from website + reviews
   - Score from: `has_spanish_version` (website has Spanish toggle/page), `spanish_review_count` (reviews in Spanish), Phoenix demographics (~43% Hispanic) as baseline
@@ -1082,20 +1083,24 @@ For each business you will receive a fact sheet of observable signals scraped fr
   - Evidence MUST cite the specific signals (e.g., "5 Spanish reviews in sample of 30, website has /es/ page")
 
 **4. Tech Readiness** — direct evidence from website scraping
-  - Score from: `has_https`, `has_mobile_viewport`, `has_online_booking`, `has_chat_widget`, `has_modern_framework`, `copyright_year`
-  - 9-10: 4+ of those signals present
-  - 7-8: 3 signals present
-  - 5-6: 1-2 signals present
-  - 1-4: Site couldn't be fetched OR only HTTPS (bare minimum)
+  - Score from: `has_https`, `has_mobile_viewport`, `has_online_booking`, `has_chat_widget`, `has_modern_framework`, `has_spanish_version`, `copyright_year` (recent = active site)
+  - The bar here is "can they integrate Ana into their workflow?" — NOT "are they a tech company." A clean modern website with HTTPS + mobile + 1 other signal already means they're capable of adopting a SaaS phone tool.
+  - 9-10: 5+ signals present (truly tech-forward business)
+  - 7-8: 3-4 signals present (clearly modern + capable)
+  - 5-6: 2 signals present (minimum viable tech literacy — they have a site that works)
+  - 3-4: Only 1 signal (very basic)
+  - 1-2: Site couldn't be fetched (no website = can't integrate anyway)
   - Evidence MUST list which signals were present
 
 **5. Ease of Closing** — proxy via observable business-structure signals
-  - Score from: `family_business_signal` on website, business size (large enterprise = harder), industry (owner-operated SMBs = easier)
-  - 9-10: Strong family/owner-operated signal AND moderate size (50-500 reviews)
-  - 7-8: Family signal present OR clearly SMB
-  - 5-6: Mid-size, no ownership clarity
-  - 1-4: Large multi-location operation OR no website to read
-  - Evidence MUST cite the actual signal (e.g., "homepage says 'Family-owned since 1985'")
+  - Score from: `family_business_signal` on website, ownership clarity, true enterprise signals
+  - IMPORTANT: high review count alone does NOT mean enterprise. A single-location insurance agency or HVAC company with 1,000+ reviews has accumulated those over years of service — it's still owner-operated and closeable. Only treat as enterprise if you see ACTUAL enterprise signals: "12 locations across AZ", "Fortune 500", "subsidiary of", explicit corporate HQ language, parent company name, or franchise structure.
+  - 9-10: Strong family/owner-operated signal (e.g., "Family-owned since 1985", "Garcia & Sons") AND no enterprise signals
+  - 7-8: Family signal OR clearly local/independent SMB (single phone number, one address, no franchise indicators)
+  - 5-6: No clear ownership signal but no enterprise signals either — assume SMB by default if industry is service-based
+  - 3-4: Multi-location chain (3-10 locations) OR clear franchise
+  - 1-2: True enterprise (10+ locations, corporate HQ, subsidiary, etc.) OR no website to inspect
+  - Evidence MUST cite the actual signal (e.g., "homepage says 'Family-owned since 1985'" or "no enterprise indicators on site, single Mesa location")
 
 **6. Urgency** — proxy via observable signals
   - Score from: industry seasonality (HVAC + Phoenix = extreme summer urgency), `has_careers_page` (hiring = growth pain), `review_velocity_signal` (accelerating = growing), `recent_review_count_90d`
@@ -1139,10 +1144,12 @@ Respond with a JSON array, one object per business. Required fields:
 ## ANTI-INFLATION RULES
 
 - A score of 9-10 requires MULTIPLE concrete signals. Never give 9+ from inference alone.
-- If `website_signals.fetched = false`, cap Tech Readiness and Ease of Closing at 5.
+- If `website_signals.fetched = false`, cap Tech Readiness at 3 and Ease of Closing at 5.
 - If `total_review_count < 20`, cap Call Volume at 5.
-- If `missed_call_complaint_count = 0` AND industry isn't HVAC/plumbing/legal, cap Missed Call Pain at 6.
+- If `missed_call_complaint_count = 0` AND industry is NOT in the high-pain list (HVAC, Plumbing, Electrical, Roofing, Restoration, Water Damage, Insurance, Solar, Legal, Bail Bonds, Locksmith, Towing, Funeral Homes), cap Missed Call Pain at 6.
+- Do NOT penalize Ease of Closing for high review count alone. Only penalize when explicit enterprise/multi-location signals are visible on the site.
 - Be brutally honest. A 6 with real evidence is better than a 9 from imagination.
+- But equally: don't artificially suppress a legitimately strong fit. If a business clearly checks the boxes for a criterion, score it high.
 
 Return ONLY the JSON array. No preamble. Begin with `[` end with `]`.
 """

@@ -236,6 +236,198 @@ def parse_website_signals(url: str, html: str | None) -> dict[str, Any]:
     if copyright_match:
         signals["copyright_year"] = int(copyright_match.group(1))
 
+    # Business association badges — adds real credibility signals.
+    # See parse_association_signals() for what we look for.
+    signals.update(parse_association_signals(soup, html, url, text_content))
+
+    return signals
+
+
+# ---------------------------------------------------------------------------
+# BUSINESS ASSOCIATION DETECTION (Phase 7)
+# ---------------------------------------------------------------------------
+# We look for membership badges/logos/text mentions on the business's homepage.
+# These are strong real-data signals:
+#   - BBB Accreditation → trust + mature business → +Ease of Closing
+#   - Hispanic Chamber membership → ACTIVELY serves Spanish market → +Bilingual
+#   - NFIB → "I'm an independent SMB owner" → +Ease of Closing
+#   - Industry associations (ACCA, PHCC, NAIFA, NPMA, SEIA) → industry engagement
+#
+# Detection uses TWO methods per association to reduce false positives:
+#   - Strong: image alt/src OR link href to the association's domain
+#   - Weak: explicit phrase in body text
+# We require at least one strong signal to flag membership.
+
+
+# BBB
+BBB_DOMAINS = ["bbb.org", "betterbusinessbureau"]
+BBB_PHRASES = ["bbb accredited", "accredited business", "better business bureau"]
+
+# Hispanic Chambers (Phoenix Valley specific)
+HISPANIC_CHAMBER_DOMAINS = [
+    "azhcc.com",          # Arizona Hispanic Chamber
+    "phoenixhcc.com",     # Phoenix Hispanic Chamber
+    "phoenixhispanicchamber",
+    "evhcc.com",          # East Valley Hispanic Chamber
+    "westvalleyhcc",
+]
+HISPANIC_CHAMBER_PHRASES = [
+    "hispanic chamber",
+    "cámara hispana",
+    "camara hispana",
+    "cámara de comercio hispana",
+    "azhcc",
+]
+
+# Generic Chamber of Commerce (any Phoenix Valley chamber)
+CHAMBER_DOMAINS = [
+    "phoenixchamber.com",
+    "mesachamber.org",
+    "scottsdalechamber.com",
+    "tempechamber.org",
+    "chandlerchamber.com",
+    "gilbertaz.gov/chamber",
+    "glendaleazchamber",
+    "peoriachamber.org",
+    "surpriseregionalchamber",
+    "avondalechamber",
+    "goodyearchamber",
+    "buckeyevalleychamber",
+    "chamberofcommerce.com",
+]
+CHAMBER_PHRASES = ["chamber of commerce member", "member of the chamber"]
+
+# NFIB
+NFIB_DOMAINS = ["nfib.com", "nfib.org"]
+NFIB_PHRASES = ["nfib member", "national federation of independent business"]
+
+# Industry-specific associations
+INDUSTRY_ASSOCIATIONS = {
+    "ACCA": {  # Air Conditioning Contractors of America (HVAC)
+        "domains": ["acca.org"],
+        "phrases": ["acca member", "air conditioning contractors of america"],
+    },
+    "PHCC": {  # Plumbing-Heating-Cooling Contractors
+        "domains": ["phccweb.org"],
+        "phrases": ["phcc member", "plumbing-heating-cooling contractors"],
+    },
+    "NAIFA": {  # National Association of Insurance and Financial Advisors
+        "domains": ["naifa.org"],
+        "phrases": ["naifa member", "national association of insurance and financial"],
+    },
+    "NPMA": {  # National Pest Management Association
+        "domains": ["npmapestworld.org", "npma.org"],
+        "phrases": ["npma member", "national pest management"],
+    },
+    "SEIA": {  # Solar Energy Industries Association
+        "domains": ["seia.org"],
+        "phrases": ["seia member", "solar energy industries association"],
+    },
+    "Trusted Choice": {  # Independent insurance agent network
+        "domains": ["trustedchoice.com"],
+        "phrases": ["trusted choice", "independent insurance agent"],
+    },
+    "AAA": {  # Auto service / restoration approvals
+        "domains": ["aaa.com/approved", "aaaapproved"],
+        "phrases": ["aaa approved auto repair"],
+    },
+}
+
+
+def _domain_referenced(soup, html_lower: str, domains: list[str]) -> str | None:
+    """Return the matching domain if any appears in image src, link href, or
+    raw HTML. None otherwise."""
+    for d in domains:
+        if d in html_lower:
+            return d
+    return None
+
+
+def _phrase_in_text(text_lower: str, phrases: list[str]) -> str | None:
+    """Return the matching phrase if any appears in the page text. None otherwise."""
+    for p in phrases:
+        if p in text_lower:
+            return p
+    return None
+
+
+def parse_association_signals(
+    soup: BeautifulSoup, html: str | None, url: str, text_content: str
+) -> dict[str, Any]:
+    """Detect business-association memberships from the business's homepage.
+
+    Strong evidence: domain reference (image src, link href, or anywhere
+    in the raw HTML). Weak evidence: phrase in visible page text. We
+    flag membership only when there's at least one strong OR a phrase
+    paired with surrounding context. Stored as both booleans and a
+    human-readable evidence list.
+    """
+    signals: dict[str, Any] = {
+        "bbb_accredited": False,
+        "hispanic_chamber_member": False,
+        "chamber_member": False,
+        "nfib_member": False,
+        "industry_associations": [],
+        "association_evidence": [],
+    }
+
+    if not html:
+        return signals
+
+    html_lower = html.lower()
+    text_lower = text_content.lower() if text_content else ""
+
+    # BBB
+    bbb_domain = _domain_referenced(soup, html_lower, BBB_DOMAINS)
+    bbb_phrase = _phrase_in_text(text_lower, BBB_PHRASES)
+    if bbb_domain or bbb_phrase:
+        signals["bbb_accredited"] = True
+        if bbb_domain:
+            signals["association_evidence"].append(f"BBB: domain reference ({bbb_domain})")
+        elif bbb_phrase:
+            signals["association_evidence"].append(f'BBB: text mentions "{bbb_phrase}"')
+
+    # Hispanic Chamber (high-signal for Bilingual)
+    hc_domain = _domain_referenced(soup, html_lower, HISPANIC_CHAMBER_DOMAINS)
+    hc_phrase = _phrase_in_text(text_lower, HISPANIC_CHAMBER_PHRASES)
+    if hc_domain or hc_phrase:
+        signals["hispanic_chamber_member"] = True
+        if hc_domain:
+            signals["association_evidence"].append(f"Hispanic Chamber: domain reference ({hc_domain})")
+        elif hc_phrase:
+            signals["association_evidence"].append(f'Hispanic Chamber: text mentions "{hc_phrase}"')
+
+    # Generic Chamber of Commerce
+    ch_domain = _domain_referenced(soup, html_lower, CHAMBER_DOMAINS)
+    ch_phrase = _phrase_in_text(text_lower, CHAMBER_PHRASES)
+    if ch_domain or ch_phrase:
+        signals["chamber_member"] = True
+        if ch_domain:
+            signals["association_evidence"].append(f"Chamber: domain reference ({ch_domain})")
+        elif ch_phrase:
+            signals["association_evidence"].append(f'Chamber: text mentions "{ch_phrase}"')
+
+    # NFIB
+    nfib_domain = _domain_referenced(soup, html_lower, NFIB_DOMAINS)
+    nfib_phrase = _phrase_in_text(text_lower, NFIB_PHRASES)
+    if nfib_domain or nfib_phrase:
+        signals["nfib_member"] = True
+        if nfib_domain:
+            signals["association_evidence"].append(f"NFIB: domain reference ({nfib_domain})")
+        elif nfib_phrase:
+            signals["association_evidence"].append(f'NFIB: text mentions "{nfib_phrase}"')
+
+    # Industry-specific associations
+    for name, refs in INDUSTRY_ASSOCIATIONS.items():
+        domain_hit = _domain_referenced(soup, html_lower, refs["domains"])
+        phrase_hit = _phrase_in_text(text_lower, refs["phrases"])
+        if domain_hit or phrase_hit:
+            signals["industry_associations"].append(name)
+            if domain_hit:
+                signals["association_evidence"].append(f"{name}: domain reference ({domain_hit})")
+            elif phrase_hit:
+                signals["association_evidence"].append(f'{name}: text mentions "{phrase_hit}"')
+
     return signals
 
 
@@ -460,5 +652,28 @@ def signals_to_evidence_brief(candidate: dict[str, Any]) -> str:
         lines.append(f"- Careers / hiring page: {'yes' if ws.get('has_careers_page') else 'no'}")
         if ws.get("copyright_year"):
             lines.append(f"- Footer copyright year: {ws['copyright_year']}")
+
+    # Business association memberships — added in Phase 7. These are
+    # high-trust signals that meaningfully change scoring.
+    if ws.get("fetched"):
+        associations = []
+        if ws.get("bbb_accredited"):
+            associations.append("BBB Accredited")
+        if ws.get("hispanic_chamber_member"):
+            associations.append("Hispanic Chamber member (STRONG bilingual signal)")
+        if ws.get("chamber_member"):
+            associations.append("Chamber of Commerce member")
+        if ws.get("nfib_member"):
+            associations.append("NFIB member (independent SMB)")
+        for ia in ws.get("industry_associations") or []:
+            associations.append(f"{ia} member (industry association)")
+
+        if associations:
+            lines.append("")
+            lines.append("**Business associations / credibility badges:**")
+            for a in associations:
+                lines.append(f"- {a}")
+            for e in (ws.get("association_evidence") or [])[:5]:
+                lines.append(f"  - evidence: {e}")
 
     return "\n".join(lines)

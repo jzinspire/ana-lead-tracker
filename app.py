@@ -1074,13 +1074,13 @@ For each business you will receive a fact sheet of observable signals scraped fr
   - 1-4: No complaints AND low-stakes industry (per-call value is small)
   - Evidence MUST quote actual complaints when present, or say "no complaints found in {N} reviews sampled; scoring from {volume} + {industry} pattern"
 
-**3. Bilingual Opportunity** — direct evidence from website + reviews
-  - Score from: `has_spanish_version` (website has Spanish toggle/page), `spanish_review_count` (reviews in Spanish), Phoenix demographics (~43% Hispanic) as baseline
-  - 9-10: Website has Spanish version AND multiple Spanish reviews
-  - 7-8: One of those signals present (Spanish reviews OR Spanish site)
-  - 5-6: No direct Spanish signals but Phoenix industry baseline
+**3. Bilingual Opportunity** — direct evidence from website + reviews + memberships
+  - Score from: `has_spanish_version`, `spanish_review_count`, `hispanic_chamber_member` (Phase 7 — STRONG signal), Phoenix demographics (~43% Hispanic) as baseline
+  - 9-10: Hispanic Chamber member, OR (Spanish website version AND multiple Spanish reviews)
+  - 7-8: One strong signal (Hispanic Chamber, OR Spanish site, OR 3+ Spanish reviews)
+  - 5-6: No direct Spanish signals but Phoenix service industry baseline (they likely serve some Spanish-speaking customers but haven't built explicit infrastructure)
   - 1-4: Low-demand industry for Spanish AND no signals
-  - Evidence MUST cite the specific signals (e.g., "5 Spanish reviews in sample of 30, website has /es/ page")
+  - Evidence MUST cite the specific signals (e.g., "Hispanic Chamber member — direct membership badge on site" or "5 Spanish reviews in sample of 30, website has /es/ page")
 
 **4. Tech Readiness** — direct evidence from website scraping
   - Score from: `has_https`, `has_mobile_viewport`, `has_online_booking`, `has_chat_widget`, `has_modern_framework`, `has_spanish_version`, `copyright_year` (recent = active site)
@@ -1092,15 +1092,16 @@ For each business you will receive a fact sheet of observable signals scraped fr
   - 1-2: Site couldn't be fetched (no website = can't integrate anyway)
   - Evidence MUST list which signals were present
 
-**5. Ease of Closing** — proxy via observable business-structure signals
-  - Score from: `family_business_signal` on website, ownership clarity, true enterprise signals
+**5. Ease of Closing** — proxy via observable business-structure signals + memberships
+  - Score from: `family_business_signal` on website, ownership clarity, true enterprise signals, `bbb_accredited`, `nfib_member`, `chamber_member`, `industry_associations` (Phase 7)
   - IMPORTANT: high review count alone does NOT mean enterprise. A single-location insurance agency or HVAC company with 1,000+ reviews has accumulated those over years of service — it's still owner-operated and closeable. Only treat as enterprise if you see ACTUAL enterprise signals: "12 locations across AZ", "Fortune 500", "subsidiary of", explicit corporate HQ language, parent company name, or franchise structure.
-  - 9-10: Strong family/owner-operated signal (e.g., "Family-owned since 1985", "Garcia & Sons") AND no enterprise signals
-  - 7-8: Family signal OR clearly local/independent SMB (single phone number, one address, no franchise indicators)
+  - Association memberships strongly signal "real, mature, accessible SMB owner" — boost the score when present.
+  - 9-10: Strong family/owner signal (e.g., "Family-owned since 1985") AND association membership (BBB / NFIB / Chamber / industry-specific), AND no enterprise signals
+  - 7-8: ANY of: family signal, NFIB member, BBB accredited, multiple association memberships, OR clearly local/independent SMB
   - 5-6: No clear ownership signal but no enterprise signals either — assume SMB by default if industry is service-based
   - 3-4: Multi-location chain (3-10 locations) OR clear franchise
   - 1-2: True enterprise (10+ locations, corporate HQ, subsidiary, etc.) OR no website to inspect
-  - Evidence MUST cite the actual signal (e.g., "homepage says 'Family-owned since 1985'" or "no enterprise indicators on site, single Mesa location")
+  - Evidence MUST cite the actual signal (e.g., "Family-owned + BBB accredited + NFIB member — classic owner-operated SMB")
 
 **6. Urgency** — proxy via observable signals
   - Score from: industry seasonality (HVAC + Phoenix = extreme summer urgency), `has_careers_page` (hiring = growth pain), `review_velocity_signal` (accelerating = growing), `recent_review_count_90d`

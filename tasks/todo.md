@@ -61,6 +61,21 @@
 - [ ] (Optional Phase B) Smart Discovery — hide already-known questions, add data-grounded ones
 - [ ] (Optional Phase B) Close Out follow-up email templates
 
+## Phase 7: Business Association Detection (COMPLETE — 2026-05-23)
+- [x] BBB Accreditation detection (domain ref + phrase patterns)
+- [x] Hispanic Chamber detection (AZ, Phoenix, East Valley) — STRONG bilingual signal
+- [x] Generic Chamber of Commerce detection (Phoenix Valley chambers)
+- [x] NFIB membership detection
+- [x] Industry-specific: ACCA, PHCC, NAIFA, NPMA, SEIA, Trusted Choice, AAA
+- [x] Wired into enrichment fact sheet
+- [x] Updated scoring rubric: Bilingual gives 9-10 for Hispanic Chamber, Ease of Closing boosts for any association
+
+## Phase 8: Scoring Rubric Recalibration (COMPLETE — 2026-05-23)
+- [x] Expanded high-pain industry list (Insurance, Solar, Roofing, Restoration, Locksmith, etc.)
+- [x] Recalibrated Tech Readiness thresholds (2 signals = 5-6, 3-4 = 7-8, 5+ = 9-10)
+- [x] Removed "high review count = enterprise" penalty in Ease of Closing
+- [x] Added rule: only treat as enterprise if multi-location/franchise signals visible
+
 ## Pending User Action
 - [ ] Restart Streamlit to pick up 2026-05-23 changes
 - [ ] Test "🔄 Re-research this business" on Parker & Sons

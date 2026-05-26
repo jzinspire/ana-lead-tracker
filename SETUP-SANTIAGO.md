@@ -75,9 +75,12 @@ Now open the `.env` file and fill in these values:
 ```
 SUPABASE_URL=https://trthktwtwaoowytaweay.supabase.co
 SUPABASE_KEY=ask Josue for this key
+APIFY_API_TOKEN=ask Josue for this key
 ```
 
-(Ask Josue to send you the SUPABASE_KEY — it's not a secret between us, just shouldn't be in this file.)
+Ask Josue for both the `SUPABASE_KEY` and `APIFY_API_TOKEN` — those are credentials we share between the two of us but don't put in the public repo. He'll send them via Slack/text.
+
+**About the Apify token:** It's our scraping account for Google Maps data. We share one token between both of us. Each "Run Deep Research" uses a tiny amount of our shared $5/month free tier. If you ever hit the limit, just tell Josue and we'll figure it out.
 
 ---
 

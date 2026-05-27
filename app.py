@@ -56,6 +56,38 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------------
+# Password gate — prevents anyone with the public Streamlit Cloud URL from
+# accessing leads, call notes, and scoring data. Only Josue and Santiago
+# know the password (shared via Slack/text, set via APP_PASSWORD env var).
+# ---------------------------------------------------------------------------
+def _check_password() -> bool:
+    """Returns True if the user has entered the correct password, False otherwise.
+    Stores the result in session state so it's only asked once per session."""
+    expected = _get_secret("APP_PASSWORD")
+    if not expected:
+        # No password configured = no gate. Helpful for first-time local setup
+        # before user has added APP_PASSWORD to .env.
+        return True
+    if st.session_state.get("password_correct"):
+        return True
+
+    st.title("🔒 Ana Lead Tracker")
+    st.caption("Internal Itxaz sales tool — partner access only.")
+    pwd = st.text_input("Password", type="password", key="pwd_input")
+    if pwd:
+        if pwd == expected:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    return False
+
+
+if not _check_password():
+    st.stop()
+
+
 STATUSES = [
     "New",
     "Research Done",

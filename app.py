@@ -1999,7 +1999,7 @@ def page_live_call():
 
     st.divider()
 
-    tabs = st.tabs(["🎬 Opener", "🛡️ Objections", "❓ Discovery", "📝 Notes", "✅ Close Out"])
+    tabs = st.tabs(["🎬 Opener", "🛡️ Objections", "❓ Discovery", "📝 Notes", "💰 ROI", "✅ Close Out"])
 
     # === Opener tab ===
     with tabs[0]:
@@ -2085,8 +2085,182 @@ def page_live_call():
             sb().table("sales_calls").update({"notes": new_notes}).eq("id", call_id).execute()
             st.success("Saved ✓")
 
-    # === Close Out tab ===
+    # === ROI Calculator tab ===
+    # Sales closing tool — feeds the prospect's own numbers back to them so
+    # the cost of Ana ($24K/yr ongoing) becomes obviously trivial vs. their
+    # missed-call losses.
     with tabs[4]:
+        st.markdown("**Live ROI Calculator — fill in their numbers during/after Discovery, then close with the math.**")
+        st.caption("All defaults are Phoenix Valley industry averages — edit anything based on what they tell you on the call.")
+
+        # Industry presets — average revenue per converted call
+        INDUSTRY_PRESETS = {
+            "Insurance": 1500,
+            "HVAC": 500,
+            "Plumbing": 400,
+            "Electrical": 450,
+            "Solar": 10000,
+            "Roofing": 8000,
+            "Water Damage / Restoration": 5000,
+            "Dental": 3000,
+            "Legal / Immigration": 3500,
+            "Veterinary": 250,
+            "Pest Control": 350,
+            "Pool Service": 200,
+            "Locksmith": 250,
+            "Bail Bonds": 800,
+            "Auto Repair": 600,
+            "Property Management": 1200,
+            "Other / Custom": 500,
+        }
+
+        # Try to default to the business's industry if it matches
+        biz_resp = sb().table("businesses").select("industry").eq("id", business_id).execute()
+        default_industry = "Other / Custom"
+        if biz_resp.data:
+            biz_industry = (biz_resp.data[0].get("industry") or "").lower()
+            for k in INDUSTRY_PRESETS.keys():
+                if k.lower().split(" ")[0] in biz_industry:
+                    default_industry = k
+                    break
+
+        roi_c1, roi_c2 = st.columns(2)
+        with roi_c1:
+            st.markdown("**Their current situation:**")
+            monthly_calls = st.number_input(
+                "Monthly inbound calls",
+                min_value=0, max_value=10000, value=500, step=50,
+                help="Ask: 'roughly how many calls do you get a month?'"
+            )
+            missed_pct = st.slider(
+                "% of calls missed (voicemail/busy/after-hours)",
+                min_value=0, max_value=80, value=25,
+                help="Industry avg is 20-35% for SMBs without 24/7 coverage. Ana captures these."
+            )
+            preset = st.selectbox(
+                "Industry preset (avg revenue per converted call)",
+                list(INDUSTRY_PRESETS.keys()),
+                index=list(INDUSTRY_PRESETS.keys()).index(default_industry),
+            )
+            avg_value = st.number_input(
+                "Avg revenue per converted call ($)",
+                min_value=0.0, value=float(INDUSTRY_PRESETS[preset]), step=50.0,
+                help="What's the typical revenue when a missed call WOULD have converted?"
+            )
+            conv_rate = st.slider(
+                "% of those missed calls that would have converted",
+                min_value=0, max_value=100, value=30,
+                help="Conservative — even if only 30% would've converted, the math still works"
+            )
+
+        with roi_c2:
+            st.markdown("**Current receptionist setup:**")
+            current_setup = st.selectbox(
+                "What do they have today?",
+                ["No receptionist (calls go to whoever's available)",
+                 "Part-time receptionist (40 hours/week)",
+                 "Full-time receptionist (40 hours/week)",
+                 "Answering service",
+                 "24/7 coverage (multiple people)"],
+            )
+
+            # Estimated cost of current setup
+            current_cost_map = {
+                "No receptionist (calls go to whoever's available)": 0,
+                "Part-time receptionist (40 hours/week)": 28000,
+                "Full-time receptionist (40 hours/week)": 50000,
+                "Answering service": 8400,  # ~$700/mo typical
+                "24/7 coverage (multiple people)": 200000,
+            }
+            current_cost = current_cost_map.get(current_setup, 0)
+            st.metric("Their current annual cost", f"${current_cost:,}",
+                      help="Fully-loaded: salary + benefits + taxes + equipment")
+
+            st.markdown("**Ana Receptionist cost:**")
+            ana_year1_cost = 46000  # $20K impl + $2K training + $24K licensing+maintenance
+            ana_ongoing_cost = 24000  # $24K/yr ongoing
+            st.metric("Ana Year 1 (one-time setup + ongoing)", f"${ana_year1_cost:,}")
+            st.metric("Ana Year 2+ (ongoing only)", f"${ana_ongoing_cost:,}")
+
+        st.divider()
+
+        # === Live computed ROI ===
+        monthly_missed = int(monthly_calls * (missed_pct / 100))
+        monthly_lost_potential = monthly_missed * avg_value * (conv_rate / 100)
+        annual_lost = monthly_lost_potential * 12
+
+        # Year 1 net: revenue recovered (vs current setup) minus Ana cost
+        # If they replace a $50K FTE with Ana, they ALSO save the FTE cost
+        annual_savings_from_replacement = current_cost - ana_ongoing_cost  # Year 2+
+        annual_net_recovery_y1 = annual_lost + (current_cost - ana_year1_cost)
+        annual_net_recovery_y2 = annual_lost + annual_savings_from_replacement
+
+        # Break-even in months
+        monthly_ana_cost = ana_year1_cost / 12
+        monthly_net_benefit = (monthly_lost_potential + current_cost / 12) - monthly_ana_cost
+        if monthly_net_benefit > 0:
+            breakeven_months = max(1, round(ana_year1_cost / (monthly_lost_potential + current_cost / 12)))
+        else:
+            breakeven_months = None
+
+        st.markdown("### 💡 The math to share on the call")
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Missed calls / month", f"{monthly_missed:,}",
+                  help=f"{missed_pct}% of {monthly_calls:,} = {monthly_missed:,}")
+        m2.metric("Revenue lost / month", f"${monthly_lost_potential:,.0f}",
+                  help=f"{monthly_missed:,} missed × {conv_rate}% conv × ${avg_value:,.0f} = ${monthly_lost_potential:,.0f}")
+        m3.metric("Revenue lost / year", f"${annual_lost:,.0f}",
+                  delta=f"vs Ana ${ana_ongoing_cost:,}/yr",
+                  help="What you're losing now annually to missed calls alone")
+
+        st.divider()
+
+        m4, m5, m6 = st.columns(3)
+        m4.metric("Year 1 net benefit", f"${annual_net_recovery_y1:,.0f}",
+                  help="Revenue recovered + current receptionist savings - Ana Year 1 cost")
+        m5.metric("Year 2+ net benefit", f"${annual_net_recovery_y2:,.0f}",
+                  help="Pure profit once setup is paid off")
+        if breakeven_months:
+            m6.metric("Break-even", f"{breakeven_months} months",
+                      help="When recovered revenue + savings = Ana cost")
+        else:
+            m6.metric("Break-even", "N/A",
+                      help="Numbers don't break even — likely too few calls. Reconsider fit.")
+
+        st.divider()
+
+        st.markdown("### 🎯 Closing lines to use")
+        if annual_net_recovery_y2 > 50000:
+            st.success(
+                f"**Strong close:** \"On your own numbers, you're losing about "
+                f"**${annual_lost:,.0f}** a year to missed calls. Ana costs **${ana_ongoing_cost:,}** a year ongoing. "
+                f"Even if I'm only 50% right about those missed calls, you're netting "
+                f"**${annual_net_recovery_y2 // 2:,.0f}** in your first year. "
+                f"That's break-even in **{breakeven_months or '~7'} months**, then it's pure profit.\""
+            )
+        elif breakeven_months and breakeven_months <= 12:
+            st.info(
+                f"**Reasonable close:** \"You'd break even in **{breakeven_months} months**, "
+                f"then recover **${annual_net_recovery_y2:,.0f}** per year going forward. "
+                f"Want me to put together a 15-minute demo so you can decide if the numbers feel right?\""
+            )
+        else:
+            st.warning(
+                "Numbers suggest this might not be a strong fit — call volume too low or "
+                "missed-call rate too low to justify Ana. Consider whether this prospect "
+                "is in the right size range, or focus on non-financial benefits (24/7 coverage, bilingual, no sick days)."
+            )
+
+        st.markdown("**Concrete talking points:**")
+        st.markdown(f"- **1 vs 100 concurrent calls.** Your receptionist takes one call. Customer #2 hears voicemail. Ana takes 100 simultaneously.")
+        if current_cost > ana_ongoing_cost:
+            st.markdown(f"- **You're paying ${current_cost:,} for current coverage.** Ana costs ${ana_ongoing_cost:,} ongoing — saves you **${current_cost - ana_ongoing_cost:,}/year** AND adds 24/7 + bilingual.")
+        st.markdown(f"- **Ana works 24/7/365.** No sick days, no vacation, no training, no turnover.")
+        st.markdown(f"- **Native bilingual.** No \"press 1 for English\" friction.")
+
+    # === Close Out tab ===
+    with tabs[5]:
         st.markdown("**End this call and log the outcome:**")
 
         outcome = st.selectbox(

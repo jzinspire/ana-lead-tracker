@@ -2,6 +2,21 @@
 
 (newest first)
 
+## 2026-05-23: ROI math beats brand storytelling for SMB sales
+Built a ROI Calculator into Live Call so during a call we can plug in the prospect's actual numbers (call volume, missed %, industry, current receptionist setup) and instantly produce a personalized break-even pitch. The shift: don't try to sell "Ana is great." Show them their own numbers and let the math sell itself. "On YOUR call volume, YOU lose $X/yr to missed calls. Ana costs $24K. Break-even in N months." Prospects can argue with a pitch, not with their own math.
+
+## 2026-05-23: Public Streamlit Cloud URL + permissive Supabase = security hole
+Streamlit Cloud deployment was publicly accessible by URL. The anon Supabase key in its secrets allowed full DB access from there. Anyone discovering the URL could see all leads and call notes. Fix: APP_PASSWORD gate at top of app.py (st.stop() if not authenticated). For an internal 2-person tool this is sufficient; full Supabase Auth is overkill until there's a third user.
+
+## 2026-05-23: apify-client 3.x has TWO breaking changes (pydantic + Run model)
+After Apify added eventPriceUsd fields to actor metadata, apify-client 3.0.0 throws 84 pydantic validation errors. Upgrade to 3.0.1. ALSO: 3.x changed the `Run` object returned by `actor.call()` from a dict to a Pydantic model — use `run.default_dataset_id`, not `run["defaultDatasetId"]`. Both bugs cause silent fallback to stub candidates in research runs.
+
+## 2026-05-23: Apify token in .env silently disappearing breaks research
+APIFY_API_TOKEN= (empty value) loads as falsy in Python's `os.getenv()`. The `if apify_token:` check fails silently and the research pipeline falls back to generating stub candidates with names like "[Research needed: Plumbing in Avondale]" that get scored 1-2 because they have no real data. Always verify token loads correctly before running.
+
+## 2026-05-23: Run Deep Research is INSERT-only by design
+The save loop deliberately skips businesses whose name already exists (`if biz["name"].lower() in existing_names: continue`). This preserves call notes / status / partner edits. Implication: to upgrade scores on existing businesses, use the per-business "Re-research this business" or the bulk Settings button — both call `_rescore_single_business()` which does UPDATE not INSERT.
+
 ## 2026-05-23: Default lists need to be audited against the actual proof points
 Research config originally had 8 industries but didn't include Insurance Agencies — yet Ricardo Diaz Insurance is our ONLY live client and entire sales proof point. Lesson: when defining "ideal customer profile" defaults, start from "who already bought" and work outward. The flagship customer's industry should never be missing from the search list.
 

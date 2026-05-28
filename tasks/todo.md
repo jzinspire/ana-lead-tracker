@@ -76,9 +76,35 @@
 - [x] Removed "high review count = enterprise" penalty in Ease of Closing
 - [x] Added rule: only treat as enterprise if multi-location/franchise signals visible
 
+## Phase 9: Apify Integration Fixes + Bulk Cleanup (COMPLETE — 2026-05-23)
+- [x] Diagnosed missing `APIFY_API_TOKEN` from .env (system was generating stub candidates)
+- [x] Logged into Apify via Claude in Chrome and grabbed token from console
+- [x] Token added to local .env (jzinspire account, FREE tier, $5/mo)
+- [x] Fixed apify-client pydantic validation errors (pinned `apify-client>=3.0.1`)
+- [x] Fixed apify-client 3.x Run-object-not-subscriptable bug (use `.default_dataset_id` attribute)
+- [x] Bulk-archived 68 stub businesses ("[Research needed: ...]" names) — soft delete only
+- [x] Verified real Phoenix businesses now flow through full enrichment pipeline (14-min runs producing real scores)
+
+## Phase 10: ROI Calculator + Cost-Comparison Objections (COMPLETE — 2026-05-23)
+- [x] Built 6th tab in Live Call interface: "💰 ROI Calculator"
+- [x] 17 industry presets for revenue-per-call (Insurance $1500, HVAC $500, Solar $10K, etc.)
+- [x] Live computation: monthly/annual revenue lost, Year 1/Year 2 net benefit, break-even month
+- [x] Dynamic closing line: "Strong close" / "Reasonable close" / "Likely not a fit" based on math
+- [x] Updated "too_expensive" objection in Supabase — leads with ROI math, $50K vs $24K comparison, 7-month break-even
+- [x] NEW "hire_receptionist" objection — full FTE cost breakdown, "1 vs 100 concurrent calls" framing, Ricardo Diaz proof point
+- [x] Total active objections: 10 → 11
+
+## Phase 11: Security Hardening (COMPLETE — 2026-05-23)
+- [x] Enabled RLS on all 7 Supabase tables with permissive policies (silences security warning, adds defense-in-depth)
+- [x] Added APP_PASSWORD gate to app.py (`itxaz-ana-2026`)
+- [x] Added APP_PASSWORD to local .env, .env.example, Streamlit Cloud secrets
+- [x] Updated SETUP-SANTIAGO.md with new credential
+
 ## Pending User Action
-- [ ] Restart Streamlit to pick up 2026-05-23 changes
-- [ ] Test "🔄 Re-research this business" on Parker & Sons
-- [ ] Run bulk re-research on all unverified businesses
-- [ ] Run a new "Run Deep Research" with the new 16×16 defaults
-- [ ] Decide on Phase 6 Call Brief build
+- [ ] Restart Streamlit (Ctrl+C → `streamlit run app.py`) to pick up password gate + ROI tab
+- [ ] Send Santiago the new APP_PASSWORD (`itxaz-ana-2026`) + git pull instructions
+- [ ] Run "🔄 Re-research all unverified businesses" in Settings to use Phase 7+8 rubric on existing 33
+- [ ] Try the ROI Calculator on a sample lead to see the math
+- [ ] Start calling (10/day elite benchmark, 3+ days of pipeline available)
+- [ ] Decide on Apify Starter ($29/mo) AFTER calling through existing pipeline
+- [ ] Decide on Phase 6 Call Brief build AFTER getting field signal from 20+ real calls
